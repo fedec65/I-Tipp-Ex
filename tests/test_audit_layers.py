@@ -169,6 +169,18 @@ class SchemaTests(unittest.TestCase):
         from report import Report
         self._check(Report(target="x").to_json_dict())
 
+    def test_audit_reports_have_no_verdicts(self):
+        """Audit scripts never emit vendor verdicts in their JSON."""
+        for script, target in (("audit_text.py", ZERO_WIDTH),
+                               ("audit_file.py", C2PA_PNG),
+                               ("audit_file.py", DOCX),
+                               ("audit_file.py", HTML)):
+            proc = subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS, script),
+                 "--json", target], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            self.assertNotIn("verdicts", json.loads(proc.stdout))
+
     def test_watermark_note(self):
         """Text-scanning reports carry the SynthID standing note."""
         out = self._cli_json("audit_text.py", ZERO_WIDTH)

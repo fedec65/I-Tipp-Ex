@@ -51,6 +51,58 @@ class ReadOnlyTests(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+NETWORK_ROOTS = {"socket", "ssl", "http", "urllib.request",
+                 "urllib.error", "ftplib", "smtplib", "asyncio"}
+# Pure string-handling / advisory helpers: exempt everywhere.
+NETWORK_EXEMPT_PREFIXES = ("urllib.parse", "urllib.robotparser")
+NETWORK_ALLOWED_SCRIPTS = {"audit_site.py", "detect_vendor.py"}
+
+
+def _network_offenders(scripts_dir: str) -> list[str]:
+    """Return "file: module" hits for network imports outside the allowlist."""
+    offenders = []
+    for name in sorted(os.listdir(scripts_dir)):
+        if not name.endswith(".py"):
+            continue
+        if name in NETWORK_ALLOWED_SCRIPTS:
+            continue
+        with open(os.path.join(scripts_dir, name), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        hits = set()
+        for node in ast.walk(tree):
+            mods = []
+            if isinstance(node, ast.Import):
+                mods = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                mods = [node.module or ""]
+            for mod in mods:
+                if mod.startswith(NETWORK_EXEMPT_PREFIXES):
+                    continue
+                if mod in NETWORK_ROOTS or \
+                        mod.split(".")[0] in {"http", "socket", "ssl"}:
+                    hits.add(mod)
+        for h in sorted(hits):
+            offenders.append(f"{name}: {h}")
+    return offenders
+
+
+class OfflineContractTests(unittest.TestCase):
+    def test_network_imports_only_in_network_scripts(self):
+        """Only audit_site.py and detect_vendor.py may import network modules."""
+        self.assertEqual(_network_offenders(SCRIPTS), [])
+
+    def test_contract_test_actually_catches_violations(self):
+        """The scanner must flag a new network import in any other script."""
+        poison = os.path.join(SCRIPTS, "poison_offline_contract_check.py")
+        with open(poison, "w", encoding="utf-8") as fh:
+            fh.write("import socket\n")
+        try:
+            offenders = _network_offenders(SCRIPTS)
+        finally:
+            os.unlink(poison)
+        self.assertIn("poison_offline_contract_check.py: socket", offenders)
+
+
 class StdlibOnlyTests(unittest.TestCase):
     def test_stdlib_only(self):
         """Every script imports only standard-library modules."""
