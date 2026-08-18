@@ -99,3 +99,44 @@ class CliGuardTests(unittest.TestCase):
         proc = self.run_cli(["--backend", "gemini", "-"], stdin_text=big)
         self.assertEqual(proc.returncode, 2)
         self.assertIn("--allow-large", proc.stderr)
+
+
+class GeminiBackendTests(unittest.TestCase):
+    def setUp(self):
+        os.environ.pop("ITIPPEX_GEMINI_API_KEY", None)
+
+    def tearDown(self):
+        os.environ.pop("ITIPPEX_GEMINI_API_KEY", None)
+
+    def test_unconfigured(self):
+        import detect_vendor
+        v = detect_vendor.gemini_verdict("hello", 5)
+        self.assertFalse(v.available)
+        self.assertIn("ITIPPEX_GEMINI_API_KEY", v.error)
+
+    def test_detected(self):
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        def fake_post(url, payload, headers, timeout):
+            self.assertNotIn("fake-key", url)  # key goes in headers, not URL
+            return {"watermarkDetected": True}
+        v = detect_vendor.gemini_verdict("hello", 5, _post=fake_post)
+        self.assertTrue(v.available)
+        self.assertTrue(v.is_watermarked)
+
+    def test_http_error_fail_soft(self):
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        def boom(url, payload, headers, timeout):
+            raise OSError("connection refused")
+        v = detect_vendor.gemini_verdict("hello", 5, _post=boom)
+        self.assertFalse(v.available)
+        self.assertIn("connection refused", v.error)
+
+    def test_malformed_response_fail_soft(self):
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        v = detect_vendor.gemini_verdict("hello", 5,
+                                         _post=lambda *a: {"unexpected": 1})
+        self.assertFalse(v.available)
+        self.assertIsNotNone(v.error)

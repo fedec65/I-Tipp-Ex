@@ -9,8 +9,10 @@ Findings. Python 3.10+ stdlib only.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -50,15 +52,137 @@ def read_input(path, max_bytes, allow_large) -> tuple[str, str]:
 def run_backends(text, backend, scheme, timeout) -> list[Verdict]:
     verdicts: list[Verdict] = []
     if backend in ("gemini", "all"):
-        verdicts.append(gemini_verdict(text, timeout))       # Task 3
+        verdicts.append(gemini_verdict(text, timeout))
     if backend in ("markllm", "all"):
         verdicts.append(markllm_verdict(text, scheme, timeout))  # Task 4
     return verdicts
 
 
-def gemini_verdict(text, timeout) -> Verdict:  # stub, replaced in Task 3
-    return Verdict(detector="gemini-synthid-text", available=False,
-                   scope_note=VENDOR_SCOPE, error="not configured")
+GEMINI_KEY_ENV = "ITIPPEX_GEMINI_API_KEY"
+GEMINI_MODEL_ENV = "ITIPPEX_GEMINI_MODEL"
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+# Endpoint/payload per the Gemini API generateContent contract with the
+# watermark-detection task type, as driven by the reference implementation
+# (taskType DETECT_TEXT_WATERMARK inside generationConfig):
+# https://github.com/guillaumemeyer/watermarks-remover/blob/main/service/scripts/text_detectors.py
+# generateContent request/response shape and x-goog-api-key auth header:
+# https://ai.google.dev/api/generate-content
+# No official docs page for the taskType was reachable at implementation
+# time; the reference repo above is the corroborating source.
+GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/"
+              "models/{model}:generateContent")
+
+_WATERMARKED_MARKERS = ("watermarked", "ai-generated", "ai generated",
+                        "likely ai")
+_SCORE_KEYS = ("watermarkScore", "watermark_score", "syntheticTextScore",
+               "synthetic_text_score", "score")
+
+
+def _post_json(url, payload, headers, timeout) -> dict:
+    """POST JSON to *url* and return the decoded response object."""
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers}, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"non-object response: {type(data).__name__}")
+    return data
+
+
+def _verdict_is_watermarked(verdict: str) -> bool:
+    """Map the detector's free-text verdict ("Likely AI-generated") to a
+    boolean. Negations ("Unlikely...", "No...", "Not...") mean no mark."""
+    low = verdict.strip().lower()
+    if low.startswith(("unlikely", "no", "not")):
+        return False
+    return any(marker in low for marker in _WATERMARKED_MARKERS)
+
+
+def _numeric_score(candidate: dict, top: dict):
+    """Pull a numeric watermark score from either response shape, if any."""
+    for container in (candidate, top):
+        for key in _SCORE_KEYS:
+            value = container.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+    attribution = candidate.get("attributionMetadata") or {}
+    if isinstance(attribution, dict):
+        for key in ("syntheticTextScore", "synthetic_text_score", "score"):
+            value = attribution.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+        synth = attribution.get("syntheticText")
+        if isinstance(synth, dict):
+            for key in ("score", "confidence"):
+                value = synth.get(key)
+                if isinstance(value, (int, float)):
+                    return float(value)
+    return None
+
+
+def _parse_gemini_response(data: dict):
+    """Extract (is_watermarked, score) from a known response shape.
+
+    Accepts both the flat boolean contract ({"watermarkDetected": bool})
+    and the generateContent shape (free-text verdict in candidates[0]
+    .content.parts[0].text, optional numeric score). Raises ValueError on
+    anything unrecognized — never guesses.
+    """
+    detected = data.get("watermarkDetected")
+    if isinstance(detected, bool):
+        return detected, _numeric_score({}, data)
+    candidates = data.get("candidates") or []
+    candidate = candidates[0] if candidates and isinstance(candidates[0],
+                                                           dict) else {}
+    if not candidate:
+        block = (data.get("promptFeedback") or {}).get("blockReason")
+        if block:
+            raise ValueError(f"Gemini blocked the request: {block}")
+        raise ValueError("Gemini returned no candidates")
+    verdict = None
+    parts = (candidate.get("content") or {}).get("parts") or []
+    if parts and isinstance(parts[0], dict):
+        verdict = parts[0].get("text")
+    if not isinstance(verdict, str) or not verdict.strip():
+        verdict = None  # empty verdict text counts as no verdict
+    score = _numeric_score(candidate, data)
+    if not isinstance(verdict, str) and score is None:
+        raise ValueError(f"unrecognized response: {sorted(data)}")
+    if isinstance(verdict, str):
+        return _verdict_is_watermarked(verdict), score
+    return score >= 0.5, score
+
+
+def gemini_verdict(text, timeout, _post=_post_json) -> Verdict:
+    """Query Google's SynthID-Text detector through the Gemini API.
+
+    Key comes from ITIPPEX_GEMINI_API_KEY (env only) and travels in the
+    x-goog-api-key header, never the URL. Every failure — unconfigured key,
+    network/HTTP/JSON error, unrecognized response — is fail-soft: an
+    unavailable Verdict, never a guessed one.
+    """
+    def out(available: bool, **kw) -> Verdict:
+        return Verdict(detector="gemini-synthid-text", available=available,
+                       scope_note=VENDOR_SCOPE, **kw)
+
+    key = os.environ.get(GEMINI_KEY_ENV)
+    if not key:
+        return out(False, error=f"{GEMINI_KEY_ENV} not set")
+    model = os.environ.get(GEMINI_MODEL_ENV, GEMINI_DEFAULT_MODEL)
+    url = GEMINI_URL.format(model=model)
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": text}]}],
+        "generationConfig": {"taskType": "DETECT_TEXT_WATERMARK"},
+    }
+    print("note: sending text to Google's API for SynthID-Text detection",
+          file=sys.stderr)
+    try:
+        data = _post(url, payload, {"x-goog-api-key": key}, timeout)
+        is_watermarked, score = _parse_gemini_response(data)
+    except Exception as exc:  # network, HTTP, JSON, parse — all fail-soft
+        return out(False, error=str(exc))
+    return out(True, is_watermarked=is_watermarked, score=score)
 
 
 def markllm_verdict(text, scheme, timeout) -> Verdict:  # stub, replaced in Task 4
