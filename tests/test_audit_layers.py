@@ -144,7 +144,7 @@ class SchemaTests(unittest.TestCase):
         self.assertTrue(self.ENVELOPE_KEYS <= set(doc),
                         f"missing envelope keys: {self.ENVELOPE_KEYS - set(doc)}")
         self.assertEqual(doc["tool"], "i-tipp-ex")
-        self.assertEqual(doc["version"], "1.0")
+        self.assertEqual(doc["version"], "1.1.0")
         self.assertIn("total", doc["summary"])
         for f in doc["findings"]:
             self.assertEqual(set(f), self.FINDING_KEYS)

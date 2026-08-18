@@ -26,7 +26,7 @@ import sys
 from dataclasses import dataclass, field
 
 TOOL_NAME = "i-tipp-ex"
-TOOL_VERSION = "1.0"
+TOOL_VERSION = "1.1.0"
 
 SEVERITIES = ("high", "medium", "low", "informational")
 CONFIDENCES = ("confirmed", "probable", "informational", "likely_false_positive")

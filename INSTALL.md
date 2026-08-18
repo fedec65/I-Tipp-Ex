@@ -14,9 +14,12 @@ git clone https://github.com/fedec65/I-Tipp-Ex.git
 
 Or download the ready-made runtime bundle (`i-tipp-ex.skill`, a zip with
 only `SKILL.md`, `scripts/`, `references/`, `assets/` — no tests, no git
-history) from the [Releases
-page](https://github.com/fedec65/I-Tipp-Ex/releases) — the easiest option
-for Claude Code / Claude app users. You can also rebuild it yourself:
+history) directly:
+[i-tipp-ex.skill (latest release)](https://github.com/fedec65/I-Tipp-Ex/releases/latest/download/i-tipp-ex.skill)
+— the easiest option for Claude Code / Claude app users. Older versions
+are on the [Releases
+page](https://github.com/fedec65/I-Tipp-Ex/releases). You can also
+rebuild it yourself:
 
 ```bash
 make dist        # produces dist/i-tipp-ex.skill (a zip)
@@ -181,7 +184,7 @@ venv, then export `ITIPPEX_MARKLLM_DIR=/path/to/checkout`. Full detail:
 `references/vendor-verdicts.md`.
 
 `make test` never touches the network, the Gemini API, or MarkLLM — the
-suite (42 tests) is fully offline.
+suite (47 tests) is fully offline.
 
 ## Verify the install
 
@@ -194,6 +197,30 @@ python3 scripts/audit_text.py assets/fixtures/text/zero_width.md
 Expected: findings for the seeded invisible characters, and the standing
 note on statistical watermarks. (The full test suite, `make test`, only
 runs from the git clone — `dist` bundles omit the tests.)
+
+## Updating from a previous version
+
+The skill stores no state outside its own directory, so updating means
+replacing the folder (or re-uploading the zip) — nothing migrates.
+
+- **Git clone** — `git pull` inside the clone. That is all.
+- **Copied folder** (Claude Code, Kimi Code / Kimi Work, project-level
+  `.claude/skills/` or `.agents/skills/`) — delete the old folder, then
+  copy the new one to the same location (see the per-host sections
+  above).
+- **Claude apps (zip upload)** — download the latest
+  [`i-tipp-ex.skill`](https://github.com/fedec65/I-Tipp-Ex/releases/latest/download/i-tipp-ex.skill),
+  then re-upload it via **Settings → Capabilities → Skills**, replacing
+  the previous upload.
+
+No configuration changes are needed when updating from 1.0.0: the new
+vendor-verdict script (`scripts/detect_vendor.py`) is opt-in and its
+environment variables (`ITIPPEX_*`) only matter if you use it. The
+version shown in reports (`"version"` in `--json` output) comes from the
+installed folder, so an updated copy reports the new version immediately.
+
+Check what changed in the
+[CHANGELOG](https://github.com/fedec65/I-Tipp-Ex/blob/main/CHANGELOG.md).
 
 ## Uninstall
 

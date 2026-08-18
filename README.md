@@ -28,7 +28,11 @@ git clone https://github.com/fedec65/I-Tipp-Ex.git
 cd I-Tipp-Ex
 ```
 
-The repo is also packaged as a portable agent skill (`SKILL.md` at the root). Per-host installation — Claude Code, Claude apps (zip upload), Kimi Code / Kimi Work, Codex CLI, plain terminal — is documented in [INSTALL.md](INSTALL.md). `make dist` builds a clean runtime bundle (`dist/i-tipp-ex.skill`, a zip) for upload-style installs.
+The repo is also packaged as a portable agent skill (`SKILL.md` at the root).
+
+**Direct download:** [`i-tipp-ex.skill`](https://github.com/fedec65/I-Tipp-Ex/releases/latest/download/i-tipp-ex.skill) (latest release — a zip with only the runtime files; rename to `.zip` if your host requires it).
+
+Per-host installation — Claude Code, Claude apps (zip upload), Kimi Code / Kimi Work, Codex CLI, plain terminal — and **how to update from a previous version** are documented in [INSTALL.md](INSTALL.md). `make dist` builds a clean runtime bundle (`dist/i-tipp-ex.skill`, a zip) for upload-style installs.
 
 ## Usage
 
