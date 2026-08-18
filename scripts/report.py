@@ -197,12 +197,15 @@ class Report:
                 if not v.available:
                     lines.append(f"- {v.detector}: unavailable ({v.error})")
                 elif v.is_watermarked is None:
-                    lines.append(f"- {v.detector}: no verdict")
+                    detail = f" (score {v.score})" if v.score is not None else ""
+                    lines.append(f"- {v.detector}: no verdict{detail}")
                 else:
                     state = "watermark detected" if v.is_watermarked else "not detected"
                     detail = ""
                     if v.score is not None and v.threshold is not None:
                         detail = f" (score {v.score}, threshold {v.threshold})"
+                    elif v.score is not None:
+                        detail = f" (score {v.score})"
                     lines.append(f"- {v.detector}: {state}{detail}")
                 if v.scope_note:
                     lines.append(f"  note: {v.scope_note}")

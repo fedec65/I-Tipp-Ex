@@ -20,7 +20,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from report import (  # noqa: E402
-    Report, Verdict, VENDOR_VERDICT_CAVEATS, STATISTICAL_WATERMARK_NOTE,
+    Report, Verdict, STATISTICAL_WATERMARK_NOTE,
     build_base_parser, emit_report, sniff_format,
 )
 
@@ -57,7 +57,7 @@ def run_backends(text, backend, scheme, timeout) -> list[Verdict]:
     if backend in ("gemini", "all"):
         verdicts.append(gemini_verdict(text, timeout))
     if backend in ("markllm", "all"):
-        verdicts.append(markllm_verdict(text, scheme, timeout))  # Task 4
+        verdicts.append(markllm_verdict(text, scheme, timeout))
     return verdicts
 
 
@@ -142,8 +142,10 @@ def _parse_gemini_response(data: dict):
 
     Accepts both the flat boolean contract ({"watermarkDetected": bool})
     and the generateContent shape (free-text verdict in candidates[0]
-    .content.parts[0].text, optional numeric score). Raises ValueError on
-    anything unrecognized — never guesses.
+    .content.parts[0].text, optional numeric score). A score with no
+    verdict text yields (None, score) — Google's score scale is
+    undocumented, so no cutoff is assumed. Raises ValueError on anything
+    unrecognized — never guesses.
     """
     detected = data.get("watermarkDetected")
     if isinstance(detected, bool):
@@ -167,7 +169,7 @@ def _parse_gemini_response(data: dict):
         raise ValueError(f"unrecognized response: {sorted(data)}")
     if isinstance(verdict, str):
         return _verdict_is_watermarked(verdict), score
-    return score >= 0.5, score
+    return None, score  # score without verdict: report it, never guess a cutoff
 
 
 def gemini_verdict(text, timeout, _post=_post_json) -> Verdict:
@@ -211,8 +213,9 @@ def markllm_verdict(text, scheme, timeout) -> Verdict:
     subprocess; the adapter emits one JSON object on its last stdout line
     ({"score": float, "threshold": float, "is_watermarked": bool} or
     {"error": ...}). Every failure — unconfigured env, missing venv python,
-    timeout, nonzero exit, unparseable stdout — is fail-soft: an unavailable
-    Verdict, never a guessed one. MarkLLM is never vendored or installed.
+    timeout, nonzero exit, unparseable stdout, non-object JSON, malformed
+    values — is fail-soft: an unavailable Verdict, never a guessed one.
+    MarkLLM is never vendored or installed.
     """
     def out(available: bool, **kw) -> Verdict:
         return Verdict(detector=f"markllm-{scheme}", available=available,
@@ -246,15 +249,22 @@ def markllm_verdict(text, scheme, timeout) -> Verdict:
     except (ValueError, IndexError):
         return out(False,
                    error=f"unparseable adapter output: {proc.stdout[:300]}")
+    if not isinstance(data, dict):
+        return out(False, error=f"adapter output is not a JSON object: "
+                                f"{proc.stdout[:300]}")
     if proc.returncode != 0 or "error" in data:
         return out(False, error=data.get("error") or proc.stderr[:300])
     for key in ("is_watermarked", "score", "threshold"):
         if key not in data:
             return out(False, error=f"adapter output missing {key!r}: "
                                     f"{proc.stdout[:300]}")
-    return out(True, is_watermarked=bool(data["is_watermarked"]),
-               score=float(data["score"]),
-               threshold=float(data["threshold"]))
+    try:
+        return out(True, is_watermarked=bool(data["is_watermarked"]),
+                   score=float(data["score"]),
+                   threshold=float(data["threshold"]))
+    except (TypeError, ValueError):
+        return out(False, error=f"malformed adapter values: "
+                                f"{proc.stdout[:300]}")
 
 
 def main(argv=None) -> int:

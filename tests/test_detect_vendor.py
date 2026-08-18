@@ -11,7 +11,6 @@ import unittest
 SCRIPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts")
 sys.path.insert(0, SCRIPTS)
 
-import report as report_mod  # noqa: E402
 from report import Report, Verdict, VERDICT_DETECTORS  # noqa: E402
 
 
@@ -48,6 +47,23 @@ class VerdictModelTests(unittest.TestCase):
         self.assertIn("Vendor verdicts (not independently verifiable)", human)
         self.assertIn("markllm-kgw", human)
         self.assertIn("0 findings", human)
+
+    def test_score_only_verdict_renders_score(self):
+        """A verdict with a score but no is_watermarked must still show the
+        score next to 'no verdict'."""
+        r = Report(target="x")
+        r.add_verdict(Verdict(detector="gemini-synthid-text", available=True,
+                              is_watermarked=None, score=0.51,
+                              scope_note="vendor verdict"))
+        human = r.render_human()
+        self.assertIn("no verdict (score 0.51)", human)
+
+    def test_scoreless_no_verdict_line_unchanged(self):
+        r = Report(target="x")
+        r.add_verdict(Verdict(detector="gemini-synthid-text", available=True,
+                              is_watermarked=None))
+        self.assertIn("- gemini-synthid-text: no verdict\n",
+                      r.render_human())
 
 
 class CliGuardTests(unittest.TestCase):
@@ -165,6 +181,20 @@ class GeminiBackendTests(unittest.TestCase):
         self.assertTrue(v.available)
         self.assertFalse(v.is_watermarked)
 
+    def test_score_without_verdict_text_is_no_guess(self):
+        """A numeric score with no verdict text must not be thresholded into
+        a boolean — Google's score scale is undocumented, so is_watermarked
+        stays None while the score is reported."""
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        def _post(url, payload, headers, timeout):
+            return {"candidates": [
+                {"content": {"parts": [{"text": ""}]}, "score": 0.51}]}
+        v = detect_vendor.gemini_verdict("hello", 5, _post=_post)
+        self.assertTrue(v.available)
+        self.assertIsNone(v.is_watermarked)
+        self.assertEqual(v.score, 0.51)
+
 
 class MarkLLMBackendTests(unittest.TestCase):
     def setUp(self):
@@ -249,3 +279,32 @@ class MarkLLMBackendTests(unittest.TestCase):
         v = detect_vendor.markllm_verdict("hello", "kgw", 5)
         self.assertFalse(v.available)
         self.assertIn("is_watermarked", v.error)
+
+    def test_non_dict_adapter_output_fail_soft(self):
+        """Adapter exits 0 emitting a bare JSON scalar (`42`) -> the
+        TypeError from `"error" in data` must be fail-soft, and the CLI must
+        not crash."""
+        import detect_vendor
+        os.environ["ITIPPEX_MARKLLM_DIR"] = self._make_stub_dir("42")
+        v = detect_vendor.markllm_verdict("hello", "kgw", 5)
+        self.assertFalse(v.available)
+        self.assertIsNotNone(v.error)
+        env = dict(os.environ)
+        env.pop("ITIPPEX_GEMINI_API_KEY", None)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SCRIPTS, "detect_vendor.py"),
+             "--backend", "markllm", "-"],
+            input="some prose " * 50, capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_null_score_adapter_output_fail_soft(self):
+        """Adapter exits 0 with {"score": null, ...} -> the TypeError from
+        float(None) must be fail-soft."""
+        import detect_vendor, json as _json
+        payload = _json.dumps({"score": None, "threshold": 3.0,
+                               "is_watermarked": True})
+        os.environ["ITIPPEX_MARKLLM_DIR"] = self._make_stub_dir(payload)
+        v = detect_vendor.markllm_verdict("hello", "kgw", 5)
+        self.assertFalse(v.available)
+        self.assertIsNotNone(v.error)
