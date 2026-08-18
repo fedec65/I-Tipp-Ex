@@ -213,3 +213,39 @@ class MarkLLMBackendTests(unittest.TestCase):
         self.assertFalse(v.available)
         self.assertIsNotNone(v.error)
         self.assertEqual(v.detector, "markllm-synthid")
+
+    def test_non_executable_venv_python_fail_soft(self):
+        """Corrupted venv: .venv/bin/python exists but is not executable ->
+        PermissionError (OSError) from subprocess.run must be fail-soft, and
+        the CLI must not crash (exit 0)."""
+        import detect_vendor, stat, tempfile
+        d = tempfile.mkdtemp()
+        bindir = os.path.join(d, ".venv", "bin")
+        os.makedirs(bindir)
+        wrapper = os.path.join(bindir, "python")
+        with open(wrapper, "w") as fh:
+            fh.write(f"#!/bin/sh\nexec {sys.executable}\n")
+        os.chmod(wrapper, 0o644)  # exists, but not executable
+        os.environ["ITIPPEX_MARKLLM_DIR"] = d
+        v = detect_vendor.markllm_verdict("hello", "kgw", 5)
+        self.assertFalse(v.available)
+        self.assertIsNotNone(v.error)
+        # end-to-end: the CLI itself must not traceback / exit nonzero
+        env = dict(os.environ)
+        env.pop("ITIPPEX_GEMINI_API_KEY", None)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SCRIPTS, "detect_vendor.py"),
+             "--backend", "markllm", "-"],
+            input="some prose " * 50, capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_missing_keys_in_adapter_success_fail_soft(self):
+        """Adapter exits 0 with parseable JSON missing required keys ->
+        KeyError must be fail-soft, error naming the missing key."""
+        import detect_vendor, json as _json
+        payload = _json.dumps({"score": 1.0})  # no is_watermarked/threshold
+        os.environ["ITIPPEX_MARKLLM_DIR"] = self._make_stub_dir(payload)
+        v = detect_vendor.markllm_verdict("hello", "kgw", 5)
+        self.assertFalse(v.available)
+        self.assertIn("is_watermarked", v.error)

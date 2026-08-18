@@ -237,6 +237,8 @@ def markllm_verdict(text, scheme, timeout) -> Verdict:
             capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return out(False, error="timeout")
+    except OSError as exc:  # e.g. venv python exists but is not executable
+        return out(False, error=str(exc))
     finally:
         os.unlink(tmp.name)
     try:
@@ -246,6 +248,10 @@ def markllm_verdict(text, scheme, timeout) -> Verdict:
                    error=f"unparseable adapter output: {proc.stdout[:300]}")
     if proc.returncode != 0 or "error" in data:
         return out(False, error=data.get("error") or proc.stderr[:300])
+    for key in ("is_watermarked", "score", "threshold"):
+        if key not in data:
+            return out(False, error=f"adapter output missing {key!r}: "
+                                    f"{proc.stdout[:300]}")
     return out(True, is_watermarked=bool(data["is_watermarked"]),
                score=float(data["score"]),
                threshold=float(data["threshold"]))
