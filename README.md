@@ -1,5 +1,9 @@
 # I-Tipp-Ex
 
+<p align="center">
+  <img src="docs/images/i-tippex-ad-professional.png" alt="I-Tipp-Ex" width="400">
+</p>
+
 Audit text, files, directories, and websites for AI-provenance signals — invisible Unicode, C2PA content credentials, document metadata, and AI-generator markers.
 
 I-Tipp-Ex is audit/transparency/security infrastructure for editors reviewing submissions, compliance teams verifying that transparency marking survived a pipeline, security reviewers inspecting suspicious documents, and researchers doing provenance forensics. It reveals what is invisible so a human can decide what it means. It is **not** a watermark-evasion tool: the audit core is strictly read-only and never alters input.
