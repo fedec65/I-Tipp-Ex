@@ -25,10 +25,10 @@ Install is a clone:
 
 ```bash
 git clone https://github.com/fedec65/I-Tipp-Ex.git
-cd i-tipp-ex
+cd I-Tipp-Ex
 ```
 
-The repo is also packaged as a portable agent skill (`SKILL.md` at the root): drop it into a Kimi/Claude agent's skills directory, or just use the scripts as plain CLIs — all capability lives in the standalone Python scripts.
+The repo is also packaged as a portable agent skill (`SKILL.md` at the root). Per-host installation — Claude Code, Claude apps (zip upload), Kimi Code / Kimi Work, Codex CLI, plain terminal — is documented in [INSTALL.md](INSTALL.md). `make dist` builds a clean runtime bundle (`dist/i-tipp-ex.skill`, a zip) for upload-style installs.
 
 ## Usage
 
