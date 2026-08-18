@@ -30,6 +30,7 @@ request.
 | Single file of any kind (binary or text container) | `python3 scripts/audit_file.py <file>` (routes by magic bytes) |
 | A directory / folder | `python3 scripts/audit_dir.py <dir> [--include-hidden]` |
 | A URL, host, or "audit my website" | `python3 scripts/audit_site.py <url> --i-am-authorized [flags]` |
+| "Is this text watermarked?" (statistical) | `python3 scripts/detect_vendor.py <file> --backend gemini|markllm|all` — opt-in; text leaves the machine for the gemini backend |
 
 For site audits, confirm ownership/authorization with the user FIRST; the
 script itself refuses to run (exit 2) without `--i-am-authorized`, because
@@ -118,6 +119,9 @@ Verbatim caveat, always in effect:
 - **Coverage honesty** for site audits: report audited/discovered counts,
   capping, timeouts, robots-skipped URLs, and cross-host sitemap entries
   dropped (only same-host URLs are audited) from the coverage line.
+- **Vendor detector output is advisory** — verdicts are never findings:
+  they are excluded from summary counts and always carry scope notes; see
+  `references/vendor-verdicts.md`.
 - **Optional tools**: `c2patool` (claim generator/assertions/signer
   detail; errors mean absence, findings removed), `exiftool`+`qpdf` (a
   verifiable PDF strip; without them PDF cleaning is labelled best-effort).
@@ -135,14 +139,16 @@ Verbatim caveat, always in effect:
   error-means-absence).
 - `references/removal-matrix.md` — target/method/label table for removal
   mode.
+- `references/vendor-verdicts.md` — opt-in statistical-watermark
+  detection (Gemini and MarkLLM backends), setup, and the fixed caveats.
 - `references/provenance-background.md` — C2PA, SynthID, EU AI Act
   transparency context, trojan-source background, legitimate use cases.
 
 ## Operational notes
 
-- Python 3.10+, standard library only. `audit_site.py` is the only
-  component with network access (stdlib urllib); everything else is fully
-  offline.
-- Tests: `make test` (19 unittest cases). Fixtures regenerate with
+- Python 3.10+, standard library only. Network I/O exists only in
+  `audit_site.py` and `detect_vendor.py` (both opt-in; stdlib urllib);
+  everything else is fully offline.
+- Tests: `make test` (42 unittest cases). Fixtures regenerate with
   `make fixtures` (deterministic; committed outputs are the source of
   truth).

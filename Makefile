@@ -9,4 +9,4 @@ fixtures:
 dist:
 	mkdir -p dist
 	rm -f dist/i-tipp-ex.skill
-	zip -r dist/i-tipp-ex.skill SKILL.md scripts references assets LICENSE README.md -x '*/__pycache__/*' -x '*.pyc' -x '.DS_Store'
+	zip -r dist/i-tipp-ex.skill SKILL.md scripts references assets LICENSE README.md INSTALL.md CHANGELOG.md -x '*/__pycache__/*' -x '*.pyc' -x '.DS_Store'
