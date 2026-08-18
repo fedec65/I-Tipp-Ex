@@ -30,9 +30,12 @@ VENDOR_SCOPE = "vendor verdict — not independently verifiable"
 MARKLLM_SCOPE = "same-scheme/same-config check only — other schemes unchecked"
 
 
-def read_input(path, max_bytes, allow_large) -> tuple[str, str]:
+def read_input(path, max_bytes, allow_large) -> tuple[str, str, bool]:
     """Read UTF-8 text from path (or stdin for '-'/None). Exit 2 on binary
-    input or oversize without allow_large."""
+    input or oversize without allow_large. Returns (text, target, truncated):
+    input is always capped at max_bytes, and truncated is True when content
+    beyond the cap was dropped (only possible with allow_large), so the
+    caller can note that the verdict covers only part of the input."""
     if path in (None, "-"):
         raw = sys.stdin.buffer.read(max_bytes + 1)
         target = "<stdin>"
@@ -44,12 +47,14 @@ def read_input(path, max_bytes, allow_large) -> tuple[str, str]:
         print(f"input exceeds {max_bytes} bytes; pass --allow-large to proceed",
               file=sys.stderr)
         raise SystemExit(2)
+    truncated = len(raw) > max_bytes
+    raw = raw[:max_bytes]  # never decode the sentinel byte (could split a char)
     if sniff_format(raw) == "binary":
         print("refusing to treat input as text: it looks like a binary "
               "container. Use audit_file.py to audit containers.",
               file=sys.stderr)
         raise SystemExit(2)
-    return raw.decode("utf-8", errors="replace"), target
+    return raw.decode("utf-8", errors="replace"), target, truncated
 
 
 def run_backends(text, backend, scheme, timeout) -> list[Verdict]:
@@ -74,13 +79,20 @@ GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
 # time; the reference repo above is the corroborating source.
 GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/"
               "models/{model}:generateContent")
+# The env-supplied model name is interpolated into the request URL; only
+# plain model IDs are allowed so a crafted value cannot redirect the
+# request (and the API key header) to another path on the API host.
+_MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 _WATERMARKED_MARKERS = ("watermarked", "ai-generated", "ai generated",
                         "likely ai")
 _VERDICT_MARKER_RES = tuple(re.compile(rf"\b{m}\b") for m in
                             _WATERMARKED_MARKERS)
 _VERDICT_NEGATION_RE = re.compile(
-    r"\b(?:unlikely|not|no|cannot|never|isn't|doesn't|wasn't)\b")
+    r"\b(?:unlikely|not|no|never|isn't|doesn't|wasn't)\b")
+_VERDICT_UNCERTAINTY_RE = re.compile(
+    r"\b(?:cannot|can't|unable|unclear|undetermined|unsure)\b")
+_CLAUSE_BREAK_RE = re.compile(r"[.!?;\n]")
 
 
 def _verdict_is_watermarked(verdict: str) -> bool:
@@ -88,13 +100,26 @@ def _verdict_is_watermarked(verdict: str) -> bool:
     for anything unrecognized — never guess. A marker counts as affirmative
     only when no negation precedes it, so "The text is not AI-generated"
     is a recognized negative rather than an affirmative. Markers match on
-    word boundaries so "likely ai" never fires inside "unlikely"."""
+    word boundaries so "likely ai" never fires inside "unlikely".
+    Negation and uncertainty are judged only within the clause containing
+    the earliest marker: wording in earlier sentences of a multi-sentence
+    reply must not flip the answer ("The text shows no unusual formatting.
+    It is watermarked." stays affirmative). Uncertainty words ("cannot",
+    "unable", "unclear", ...) raise ValueError — an undecided detector
+    fails soft to an unavailable verdict, never a confident negative."""
     low = verdict.strip().lower()
     hits = [match.start() for match in
             (r.search(low) for r in _VERDICT_MARKER_RES) if match]
     if not hits:
         raise ValueError(f"unrecognized verdict text: {verdict!r}")
-    if _VERDICT_NEGATION_RE.search(low[:min(hits)]):
+    first = min(hits)
+    clause_start = 0
+    for m in _CLAUSE_BREAK_RE.finditer(low, 0, first):
+        clause_start = m.end()
+    clause = low[clause_start:first]
+    if _VERDICT_UNCERTAINTY_RE.search(clause):
+        raise ValueError(f"uncertain verdict text: {verdict!r}")
+    if _VERDICT_NEGATION_RE.search(clause):
         return False
     return True
 
@@ -188,6 +213,8 @@ def gemini_verdict(text, timeout, _post=_post_json) -> Verdict:
     if not key:
         return out(False, error=f"{GEMINI_KEY_ENV} not set")
     model = os.environ.get(GEMINI_MODEL_ENV, GEMINI_DEFAULT_MODEL)
+    if not _MODEL_ID_RE.fullmatch(model):
+        return out(False, error=f"invalid {GEMINI_MODEL_ENV} value: {model!r}")
     url = GEMINI_URL.format(model=model)
     payload = {
         "contents": [{"role": "user", "parts": [{"text": text}]}],
@@ -283,10 +310,14 @@ def main(argv=None) -> int:
                         help=f"allow inputs over {SIZE_CAP} bytes")
     args = parser.parse_args(argv)
 
-    text, target = read_input(args.file, min(args.max_bytes, SIZE_CAP)
-                              if not args.allow_large else args.max_bytes,
-                              args.allow_large)
+    cap = (min(args.max_bytes, SIZE_CAP)
+           if not args.allow_large else args.max_bytes)
+    text, target, truncated = read_input(args.file, cap, args.allow_large)
     rep = Report(target=target)
+    if truncated:
+        rep.add_note(
+            f"Input truncated at {cap} bytes (--max-bytes); "
+            "the verdict covers only the first part of the input.")
     for v in run_backends(text, args.backend, args.scheme, args.timeout):
         rep.add_verdict(v)
     rep.add_note(STATISTICAL_WATERMARK_NOTE)

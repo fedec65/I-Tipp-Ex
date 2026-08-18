@@ -48,6 +48,17 @@ class VerdictModelTests(unittest.TestCase):
         self.assertIn("markllm-kgw", human)
         self.assertIn("0 findings", human)
 
+    def test_caveats_travel_with_verdicts_in_json(self):
+        """The fixed caveats must appear in machine-readable output too —
+        vendor-verdicts.md promises them with every run."""
+        from report import VENDOR_VERDICT_CAVEATS
+        r = Report(target="x")
+        r.add_verdict(Verdict(detector="markllm-kgw", available=False,
+                              error="ITIPPEX_MARKLLM_DIR not set"))
+        self.assertEqual(r.to_json_dict()["caveats"],
+                         list(VENDOR_VERDICT_CAVEATS))
+        self.assertNotIn("caveats", Report(target="x").to_json_dict())
+
     def test_score_only_verdict_renders_score(self):
         """A verdict with a score but no is_watermarked must still show the
         score next to 'no verdict'."""
@@ -116,6 +127,16 @@ class CliGuardTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("--allow-large", proc.stderr)
 
+    def test_allow_large_truncation_is_noted(self):
+        """Input beyond --max-bytes with --allow-large is cut to the cap and
+        the report must say the verdict covers only part of the input."""
+        proc = self.run_cli(
+            ["--backend", "gemini", "--json", "--max-bytes", "100",
+             "--allow-large", "-"], stdin_text="y" * 200)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        d = json.loads(proc.stdout)
+        self.assertTrue(any("truncated" in n.lower() for n in d["notes"]))
+
 
 class GeminiBackendTests(unittest.TestCase):
     def setUp(self):
@@ -180,6 +201,43 @@ class GeminiBackendTests(unittest.TestCase):
             "hello", 5, _post=self._verdict_post("The text is not AI-generated"))
         self.assertTrue(v.available)
         self.assertFalse(v.is_watermarked)
+
+    def test_prior_sentence_negation_does_not_flip_affirmative(self):
+        """Negation in an earlier sentence must not negate the marker's own
+        clause (Devin review #1)."""
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        v = detect_vendor.gemini_verdict(
+            "hello", 5, _post=self._verdict_post(
+                "The text shows no unusual formatting. It is watermarked."))
+        self.assertTrue(v.available)
+        self.assertTrue(v.is_watermarked)
+
+    def test_uncertain_reply_is_unavailable_not_negative(self):
+        """"I cannot determine..." must fail soft to unavailable (ValueError
+        path), never render as a confident negative (Devin review #1)."""
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        v = detect_vendor.gemini_verdict(
+            "hello", 5, _post=self._verdict_post(
+                "I cannot determine whether this text is AI-generated"))
+        self.assertFalse(v.available)
+        self.assertIsNotNone(v.error)
+
+    def test_invalid_model_env_fail_soft(self):
+        """A model name with path characters must be rejected before it
+        reaches the request URL (Devin review #4)."""
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        os.environ["ITIPPEX_GEMINI_MODEL"] = "../other-path"
+        try:
+            def _post(url, payload, headers, timeout):
+                raise AssertionError(f"request went out to {url}")
+            v = detect_vendor.gemini_verdict("hello", 5, _post=_post)
+        finally:
+            os.environ.pop("ITIPPEX_GEMINI_MODEL", None)
+        self.assertFalse(v.available)
+        self.assertIn("invalid", v.error)
 
     def test_score_without_verdict_text_is_no_guess(self):
         """A numeric score with no verdict text must not be thresholded into

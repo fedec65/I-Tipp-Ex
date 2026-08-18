@@ -164,6 +164,10 @@ class Report:
         }
         if self.verdicts:
             out["verdicts"] = [v.to_dict() for v in self.verdicts]
+            # The fixed caveats must travel with the verdicts in every
+            # rendering, machine-readable included (vendor-verdicts.md
+            # promises them with every run).
+            out["caveats"] = list(VENDOR_VERDICT_CAVEATS)
         return out
 
     def render_json(self) -> str:
