@@ -80,6 +80,49 @@ class Finding:
         }
 
 
+VERDICT_DETECTORS = ("gemini-synthid-text", "markllm-kgw", "markllm-synthid")
+
+VENDOR_VERDICT_CAVEATS = (
+    "Vendor verdicts come from a vendor-operated detector; the key stays with "
+    "the vendor and the result is not independently verifiable.",
+    "MarkLLM checks one scheme under one configuration; a negative result does "
+    "not rule out other schemes or configs.",
+    "Absence of a verdict proves nothing either way.",
+)
+
+
+@dataclass
+class Verdict:
+    """An external detector's answer about statistical watermarking.
+
+    Never a Finding: verdicts do not enter severity counts and must always
+    carry scope_note caveats.
+    """
+
+    detector: str                     # one of VERDICT_DETECTORS
+    available: bool                   # False = unconfigured/errored; see error
+    is_watermarked: bool | None = None
+    score: float | None = None
+    threshold: float | None = None
+    scope_note: str = ""
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.detector not in VERDICT_DETECTORS:
+            raise ValueError(f"bad detector: {self.detector!r}")
+
+    def to_dict(self) -> dict:
+        return {
+            "detector": self.detector,
+            "available": self.available,
+            "is_watermarked": self.is_watermarked,
+            "score": self.score,
+            "threshold": self.threshold,
+            "scope_note": self.scope_note,
+            "error": self.error,
+        }
+
+
 @dataclass
 class Report:
     """Aggregated findings for one audit target."""
@@ -87,11 +130,15 @@ class Report:
     target: str
     findings: list[Finding] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    verdicts: list[Verdict] = field(default_factory=list)
     tool: str = TOOL_NAME
     version: str = TOOL_VERSION
 
     def add_finding(self, finding: Finding) -> None:
         self.findings.append(finding)
+
+    def add_verdict(self, verdict: Verdict) -> None:
+        self.verdicts.append(verdict)
 
     def add_note(self, note: str) -> None:
         if note not in self.notes:
@@ -104,7 +151,7 @@ class Report:
         return counts
 
     def to_json_dict(self) -> dict:
-        return {
+        out = {
             "tool": self.tool,
             "version": self.version,
             "target": self.target,
@@ -115,6 +162,9 @@ class Report:
             },
             "findings": [f.to_dict() for f in self.findings],
         }
+        if self.verdicts:
+            out["verdicts"] = [v.to_dict() for v in self.verdicts]
+        return out
 
     def render_json(self) -> str:
         return json.dumps(self.to_json_dict(), indent=2, ensure_ascii=False)
@@ -140,6 +190,24 @@ class Report:
             lines.append("Standing notes:")
             for n in self.notes:
                 lines.append(f"- {n}")
+            lines.append("")
+        if self.verdicts:
+            lines.append("Vendor verdicts (not independently verifiable)")
+            for v in self.verdicts:
+                if not v.available:
+                    lines.append(f"- {v.detector}: unavailable ({v.error})")
+                elif v.is_watermarked is None:
+                    lines.append(f"- {v.detector}: no verdict")
+                else:
+                    state = "watermark detected" if v.is_watermarked else "not detected"
+                    detail = ""
+                    if v.score is not None and v.threshold is not None:
+                        detail = f" (score {v.score}, threshold {v.threshold})"
+                    lines.append(f"- {v.detector}: {state}{detail}")
+                if v.scope_note:
+                    lines.append(f"  note: {v.scope_note}")
+            for caveat in VENDOR_VERDICT_CAVEATS:
+                lines.append(f"  caveat: {caveat}")
             lines.append("")
         lines.append(
             f"{len(self.findings)} findings "
