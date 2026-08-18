@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -74,6 +75,28 @@ GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/"
 
 _WATERMARKED_MARKERS = ("watermarked", "ai-generated", "ai generated",
                         "likely ai")
+_VERDICT_MARKER_RES = tuple(re.compile(rf"\b{m}\b") for m in
+                            _WATERMARKED_MARKERS)
+_VERDICT_NEGATION_RE = re.compile(
+    r"\b(?:unlikely|not|no|cannot|never|isn't|doesn't|wasn't)\b")
+
+
+def _verdict_is_watermarked(verdict: str) -> bool:
+    """Map a RECOGNIZED free-text verdict to a boolean; raise ValueError
+    for anything unrecognized — never guess. A marker counts as affirmative
+    only when no negation precedes it, so "The text is not AI-generated"
+    is a recognized negative rather than an affirmative. Markers match on
+    word boundaries so "likely ai" never fires inside "unlikely"."""
+    low = verdict.strip().lower()
+    hits = [match.start() for match in
+            (r.search(low) for r in _VERDICT_MARKER_RES) if match]
+    if not hits:
+        raise ValueError(f"unrecognized verdict text: {verdict!r}")
+    if _VERDICT_NEGATION_RE.search(low[:min(hits)]):
+        return False
+    return True
+
+
 _SCORE_KEYS = ("watermarkScore", "watermark_score", "syntheticTextScore",
                "synthetic_text_score", "score")
 
@@ -88,15 +111,6 @@ def _post_json(url, payload, headers, timeout) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"non-object response: {type(data).__name__}")
     return data
-
-
-def _verdict_is_watermarked(verdict: str) -> bool:
-    """Map the detector's free-text verdict ("Likely AI-generated") to a
-    boolean. Negations ("Unlikely...", "No...", "Not...") mean no mark."""
-    low = verdict.strip().lower()
-    if low.startswith(("unlikely", "no", "not")):
-        return False
-    return any(marker in low for marker in _WATERMARKED_MARKERS)
 
 
 def _numeric_score(candidate: dict, top: dict):

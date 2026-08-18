@@ -140,3 +140,27 @@ class GeminiBackendTests(unittest.TestCase):
                                          _post=lambda *a: {"unexpected": 1})
         self.assertFalse(v.available)
         self.assertIsNotNone(v.error)
+
+    @staticmethod
+    def _verdict_post(text):
+        def _post(url, payload, headers, timeout):
+            return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+        return _post
+
+    def test_unrecognized_verdict_text_fail_soft(self):
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        for text in ("Cannot determine", "Analysis unavailable"):
+            with self.subTest(text=text):
+                v = detect_vendor.gemini_verdict(
+                    "hello", 5, _post=self._verdict_post(text))
+                self.assertFalse(v.available, text)
+                self.assertIsNotNone(v.error)
+
+    def test_negated_sentence_verdict_is_recognized_negative(self):
+        import detect_vendor
+        os.environ["ITIPPEX_GEMINI_API_KEY"] = "fake-key"
+        v = detect_vendor.gemini_verdict(
+            "hello", 5, _post=self._verdict_post("The text is not AI-generated"))
+        self.assertTrue(v.available)
+        self.assertFalse(v.is_watermarked)
