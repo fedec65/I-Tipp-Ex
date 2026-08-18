@@ -164,3 +164,52 @@ class GeminiBackendTests(unittest.TestCase):
             "hello", 5, _post=self._verdict_post("The text is not AI-generated"))
         self.assertTrue(v.available)
         self.assertFalse(v.is_watermarked)
+
+
+class MarkLLMBackendTests(unittest.TestCase):
+    def setUp(self):
+        os.environ.pop("ITIPPEX_MARKLLM_DIR", None)
+
+    def tearDown(self):
+        os.environ.pop("ITIPPEX_MARKLLM_DIR", None)
+
+    def _make_stub_dir(self, payload: str, exit_code: int = 0) -> str:
+        import tempfile, stat
+        d = tempfile.mkdtemp()
+        bindir = os.path.join(d, ".venv", "bin")
+        os.makedirs(bindir)
+        adapter_target = os.path.join(d, "fake_adapter.py")
+        with open(adapter_target, "w") as fh:
+            fh.write(f"import sys; print({payload!r}); sys.exit({exit_code})\n")
+        # detect_vendor calls <dir>/.venv/bin/python <adapter> ... — make a
+        # wrapper that routes to the real interpreter and our fake adapter.
+        wrapper = os.path.join(bindir, "python")
+        with open(wrapper, "w") as fh:
+            fh.write(f"#!/bin/sh\nexec {sys.executable} {adapter_target}\n")
+        os.chmod(wrapper, os.stat(wrapper).st_mode | stat.S_IEXEC)
+        return d
+
+    def test_unconfigured(self):
+        import detect_vendor
+        v = detect_vendor.markllm_verdict("hello", "kgw", 5)
+        self.assertFalse(v.available)
+        self.assertIn("ITIPPEX_MARKLLM_DIR", v.error)
+
+    def test_detected_true(self):
+        import detect_vendor, json as _json
+        payload = _json.dumps({"score": 4.3, "threshold": 3.0,
+                               "is_watermarked": True})
+        os.environ["ITIPPEX_MARKLLM_DIR"] = self._make_stub_dir(payload)
+        v = detect_vendor.markllm_verdict("hello", "kgw", 5)
+        self.assertTrue(v.available)
+        self.assertTrue(v.is_watermarked)
+        self.assertEqual(v.score, 4.3)
+        self.assertEqual(v.detector, "markllm-kgw")
+
+    def test_crash_fail_soft(self):
+        import detect_vendor
+        os.environ["ITIPPEX_MARKLLM_DIR"] = self._make_stub_dir("boom", exit_code=1)
+        v = detect_vendor.markllm_verdict("hello", "synthid", 5)
+        self.assertFalse(v.available)
+        self.assertIsNotNone(v.error)
+        self.assertEqual(v.detector, "markllm-synthid")

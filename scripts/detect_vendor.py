@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -199,9 +201,54 @@ def gemini_verdict(text, timeout, _post=_post_json) -> Verdict:
     return out(True, is_watermarked=is_watermarked, score=score)
 
 
-def markllm_verdict(text, scheme, timeout) -> Verdict:  # stub, replaced in Task 4
-    return Verdict(detector=f"markllm-{scheme}", available=False,
-                   scope_note=MARKLLM_SCOPE, error="not configured")
+MARKLLM_DIR_ENV = "ITIPPEX_MARKLLM_DIR"
+
+
+def markllm_verdict(text, scheme, timeout) -> Verdict:
+    """Detect via an external MarkLLM checkout's venv (ITIPPEX_MARKLLM_DIR).
+
+    Runs scripts/markllm_adapter.py with <dir>/.venv/bin/python as a
+    subprocess; the adapter emits one JSON object on its last stdout line
+    ({"score": float, "threshold": float, "is_watermarked": bool} or
+    {"error": ...}). Every failure — unconfigured env, missing venv python,
+    timeout, nonzero exit, unparseable stdout — is fail-soft: an unavailable
+    Verdict, never a guessed one. MarkLLM is never vendored or installed.
+    """
+    def out(available: bool, **kw) -> Verdict:
+        return Verdict(detector=f"markllm-{scheme}", available=available,
+                       scope_note=MARKLLM_SCOPE, **kw)
+
+    root = os.environ.get(MARKLLM_DIR_ENV)
+    if not root:
+        return out(False, error=f"{MARKLLM_DIR_ENV} not set")
+    venv_py = os.path.join(root, ".venv", "bin", "python")
+    if not os.path.exists(venv_py):
+        return out(False, error=f"no venv python at {venv_py}")
+    adapter = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "markllm_adapter.py")
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
+                                      encoding="utf-8")
+    try:
+        tmp.write(text)
+        tmp.close()
+        proc = subprocess.run(
+            [venv_py, adapter, "detect", tmp.name, "--scheme", scheme,
+             "--json"],
+            capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return out(False, error="timeout")
+    finally:
+        os.unlink(tmp.name)
+    try:
+        data = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return out(False,
+                   error=f"unparseable adapter output: {proc.stdout[:300]}")
+    if proc.returncode != 0 or "error" in data:
+        return out(False, error=data.get("error") or proc.stderr[:300])
+    return out(True, is_watermarked=bool(data["is_watermarked"]),
+               score=float(data["score"]),
+               threshold=float(data["threshold"]))
 
 
 def main(argv=None) -> int:
