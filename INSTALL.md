@@ -12,8 +12,11 @@ your agent host looks for skills, or uploading the zip.
 git clone https://github.com/fedec65/I-Tipp-Ex.git
 ```
 
-Or download a clean runtime bundle (only `SKILL.md`, `scripts/`,
-`references/`, `assets/` — no tests, no git history):
+Or download the ready-made runtime bundle (`i-tipp-ex.skill`, a zip with
+only `SKILL.md`, `scripts/`, `references/`, `assets/` — no tests, no git
+history) from the [Releases
+page](https://github.com/fedec65/I-Tipp-Ex/releases) — the easiest option
+for Claude Code / Claude app users. You can also rebuild it yourself:
 
 ```bash
 make dist        # produces dist/i-tipp-ex.skill (a zip)
@@ -62,6 +65,68 @@ cp -r I-Tipp-Ex /path/to/project/.agents/skills/i-tipp-ex
 
 All internal references in `SKILL.md` are relative to the skill root, so
 the folder works unchanged at any of these locations.
+
+## DeepSeek (DeepSeek Harness)
+
+DeepSeek's official open-source agent harness
+([deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness),
+developer preview) supports `SKILL.md` skill bundles natively:
+
+```bash
+# user scope (dshHome defaults to ~/.dsh):
+cp -r I-Tipp-Ex ~/.dsh/skills/i-tipp-ex
+
+# project scope — either of:
+cp -r I-Tipp-Ex /path/to/project/.dsh/skills/i-tipp-ex
+cp -r I-Tipp-Ex /path/to/project/.agents/skills/i-tipp-ex
+```
+
+The deepseek-chat app and the raw API have no skill mechanism; for those,
+run DeepSeek models through a harness (DSH, Claude Code, etc.) and install
+the skill there.
+
+## Mistral (Mistral Vibe)
+
+[Mistral Vibe](https://github.com/mistralai/mistral-vibe) (`pip install
+mistral-vibe`) implements the Agent Skills specification:
+
+```bash
+# user scope:
+cp -r I-Tipp-Ex ~/.vibe/skills/i-tipp-ex
+# or:
+cp -r I-Tipp-Ex ~/.agents/skills/i-tipp-ex
+
+# project scope — either of:
+cp -r I-Tipp-Ex /path/to/project/.vibe/skills/i-tipp-ex
+cp -r I-Tipp-Ex /path/to/project/.agents/skills/i-tipp-ex
+```
+
+Le Chat has no skill format; it supports MCP connectors instead — the
+i-tipp-ex scripts can be wrapped in an MCP server if needed, but that is
+out of scope for this repo.
+
+## MiniMax
+
+MiniMax has no own-CLI skill format. The official path is the Token Plan
+with Claude Code pointed at MiniMax's Anthropic-compatible endpoint
+(`ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic` in
+`~/.claude/settings.json` — see the [MiniMax
+docs](https://platform.minimax.io/docs/token-plan/claude-code)). In that
+setup, install the skill exactly as described under **Claude Code** above.
+
+## Z.ai (GLM)
+
+The GLM Coding Plan officially supports Claude Code via an
+Anthropic-compatible endpoint (`https://api.z.ai/api/anthropic` — see the
+[Z.ai quick start](https://docs.z.ai/devpack/quick-start)); install the
+skill as described under **Claude Code**. Z.ai's own desktop IDE, ZCode,
+reportedly supports reusable skills, but its skill format/location is not
+documented officially at the time of writing — treat it as unverified.
+
+### One copy, several hosts
+
+`~/.agents/skills/i-tipp-ex/` is scanned by Kimi Code, DeepSeek Harness,
+and Mistral Vibe alike — a single copy serves all three.
 
 ## OpenAI Codex CLI / ChatGPT code interpreter
 
