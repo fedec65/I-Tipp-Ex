@@ -18,7 +18,7 @@ Four layers, each reported with severity, confidence, and evidence:
 ## Requirements & install
 
 - Python 3.10+, **standard library only** — zero pip dependencies.
-- Fully offline, except `audit_site.py` (which crawls, by design).
+- Fully offline, except `audit_site.py` (which crawls, by design) and `detect_vendor.py` (opt-in vendor queries, only when explicitly run).
 - Optional external tools are used if present, with graceful degradation when absent: `c2patool` (C2PA deep-dive), `exiftool`, `qpdf` (stronger PDF metadata removal).
 
 Install is a clone:
@@ -59,6 +59,24 @@ python3 scripts/audit_site.py https://example.com --i-am-authorized \
 
 `audit_site.py` additional flags: `--max-assets N` (default 100), `--timeout SECONDS` (per request, default 20), `--max-resource-bytes N` (per-resource cap, default 50 MiB).
 
+### Vendor verdicts (opt-in)
+
+Statistical (token-choice) watermarks cannot be detected from the bytes alone — that takes an external detector. `detect_vendor.py` is the opt-in entry point for it, and it returns **verdicts, never findings** (advisory only, excluded from summary counts, always with scope notes):
+
+```bash
+# gemini backend: Google's SynthID-Text detector — text leaves the machine; key required
+export ITIPPEX_GEMINI_API_KEY=...
+python3 scripts/detect_vendor.py notes.md --backend gemini
+
+# markllm backend: external THU-BPM/MarkLLM checkout, runs locally in its own venv
+export ITIPPEX_MARKLLM_DIR=/path/to/MarkLLM
+python3 scripts/detect_vendor.py notes.md --backend markllm --scheme kgw
+```
+
+Environment variables: `ITIPPEX_GEMINI_API_KEY` (required for the gemini backend), `ITIPPEX_GEMINI_MODEL` (default `gemini-2.5-flash`), `ITIPPEX_MARKLLM_DIR` (path to an external MarkLLM checkout containing `.venv/bin/python`; MarkLLM is never vendored or auto-installed). Flags: `--scheme kgw|synthid` (default kgw), `--timeout` (default 30s), `--allow-large` (inputs over 1 MiB are refused otherwise).
+
+Caveats, always in effect: a vendor verdict comes from a vendor-operated detector and is not independently verifiable; MarkLLM checks one scheme under one configuration, so a negative result does not rule out other schemes or configs; absence of a verdict proves nothing either way. The gemini backend's endpoint shape follows an undocumented task type and fails soft (verdict unavailable) on anything unrecognized; when it actually fires, an egress notice prints to stderr — no key, no egress. Setup and full detail: `references/vendor-verdicts.md`.
+
 ## Removal mode
 
 `clean_text.py` / `clean_file.py` strip invisible characters and metadata — **only when explicitly invoked**. Constraints enforced in code:
@@ -85,7 +103,7 @@ Flags: `-o/--output PATH`, `--force` (overwrite existing output), `--yes`, `--js
 ## Development
 
 ```bash
-make test      # 19 stdlib unittest tests
+make test      # 42 stdlib unittest tests, fully offline
 make fixtures  # regenerate assets/fixtures/
 ```
 
@@ -96,7 +114,7 @@ Layout:
 - `assets/fixtures/` — generated test fixtures
 - `tests/` — stdlib `unittest` suite
 
-Scripts are host-neutral and portable; everything runs offline except `audit_site.py`.
+Scripts are host-neutral and portable; everything runs offline except `audit_site.py` and `detect_vendor.py`.
 
 ## License
 

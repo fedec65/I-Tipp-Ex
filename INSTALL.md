@@ -164,6 +164,25 @@ python3 scripts/audit_text.py suspicious.md
 python3 scripts/audit_dir.py ./incoming --json -o report.json
 ```
 
+## Optional: vendor-verdict detection
+
+`scripts/detect_vendor.py` is opt-in and needs no setup until you
+actually use it. It is configured entirely through environment variables:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `ITIPPEX_GEMINI_API_KEY` | API key for the gemini backend (Google's SynthID-Text detector); when set and used, the text is sent to Google's API | unset (backend reports unavailable) |
+| `ITIPPEX_GEMINI_MODEL` | Gemini model used for the detection request | `gemini-2.5-flash` |
+| `ITIPPEX_MARKLLM_DIR` | Path to an external MarkLLM checkout containing `.venv/bin/python`; MarkLLM is never vendored or auto-installed | unset (backend reports unavailable) |
+
+MarkLLM setup sketch: clone `THU-BPM/MarkLLM`, run `python3 -m venv
+.venv` inside the checkout, install MarkLLM's dependencies into that
+venv, then export `ITIPPEX_MARKLLM_DIR=/path/to/checkout`. Full detail:
+`references/vendor-verdicts.md`.
+
+`make test` never touches the network, the Gemini API, or MarkLLM — the
+suite (42 tests) is fully offline.
+
 ## Verify the install
 
 From inside the installed folder:

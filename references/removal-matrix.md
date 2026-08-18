@@ -35,6 +35,11 @@ cleaning code. Every result is labelled one of:
 | Statistical (token-choice) text watermarks (e.g. SynthID-Text) | **Not addressable** — see caveat below | not addressable |
 | Pixel-domain / perceptual watermarks (e.g. SynthID media watermark embedded in pixels) | **Not addressable** — any removal requires rewriting content, which this tool never does | not addressable |
 
+Advisory *detection* of statistical (token-choice) watermarks is
+available via the opt-in `scripts/detect_vendor.py` (see
+`references/vendor-verdicts.md`); this does not change the removal
+status — they remain not addressable.
+
 ## Verbatim caveat (always printed)
 
 > Statistical (token-choice) watermarks such as SynthID-Text cannot be
